@@ -57,21 +57,67 @@ function parseExcel(filePath) {
   const ws = wb.Sheets[wb.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
 
-  // Auto-detect columns (id, name) – look for common column names
-  const idKeys   = ['id', 'student_id', 'studentid', 'matric', 'reg_no', 'regno', 'roll'];
-  const nameKeys = ['name', 'fullname', 'full_name', 'student_name', 'studentname'];
-
   if (rows.length === 0) return [];
 
-  const headers = Object.keys(rows[0]).map(k => k.toLowerCase().trim());
-  const idCol   = Object.keys(rows[0]).find(k => idKeys.includes(k.toLowerCase().trim()))   || Object.keys(rows[0])[0];
-  const nameCol = Object.keys(rows[0]).find(k => nameKeys.includes(k.toLowerCase().trim())) || Object.keys(rows[0])[1] || idCol;
+  const headers = Object.keys(rows[0]);
 
-  return rows.map((row, i) => ({
-    id:   String(row[idCol] || `STU-${i + 1}`).trim(),
-    name: String(row[nameCol] || 'Unknown').trim(),
-    raw:  row
-  }));
+  // Auto-detect Matric/ID column
+  const idKeys = ['matric no', 'matric_no', 'matricno', 'matric', 'id', 'student_id',
+                  'studentid', 'reg_no', 'regno', 'roll', 'registration number'];
+  const idCol = headers.find(k => idKeys.includes(k.toLowerCase().trim())) || headers[0];
+
+  // Auto-detect Surname column
+  const surnameKeys = ['surname', 'last name', 'lastname', 'family name'];
+  const surnameCol = headers.find(k => surnameKeys.includes(k.toLowerCase().trim()));
+
+  // Auto-detect Other Names / First name column
+  const otherNameKeys = ['other names', 'othernames', 'other name', 'first name',
+                         'firstname', 'given name', 'givenname', 'middle name'];
+  const otherNameCol = headers.find(k => otherNameKeys.includes(k.toLowerCase().trim()));
+
+  // Auto-detect single full name column as fallback
+  const nameKeys = ['name', 'fullname', 'full_name', 'full name', 'student_name', 'studentname'];
+  const nameCol = headers.find(k => nameKeys.includes(k.toLowerCase().trim()));
+
+  // Extra fields your app might need
+  const facultyKeys = ['faculty'];
+  const deptKeys = ['department', 'dept'];
+  const emailKeys = ['email'];
+  const levelKeys = ['level'];
+  const cardKeys = ['card no', 'card_no', 'cardno'];
+
+  const facultyCol = headers.find(k => facultyKeys.includes(k.toLowerCase().trim()));
+  const deptCol    = headers.find(k => deptKeys.includes(k.toLowerCase().trim()));
+  const emailCol   = headers.find(k => emailKeys.includes(k.toLowerCase().trim()));
+  const levelCol   = headers.find(k => levelKeys.includes(k.toLowerCase().trim()));
+  const cardCol    = headers.find(k => cardKeys.includes(k.toLowerCase().trim()));
+
+  return rows.map((row, i) => {
+    // Build full name: prefer Surname + Other Names, fallback to single name col
+    let fullName;
+    if (surnameCol && otherNameCol) {
+      const surname   = String(row[surnameCol]   || '').trim();
+      const otherName = String(row[otherNameCol] || '').trim();
+      fullName = [surname, otherName].filter(Boolean).join(' ');
+    } else if (nameCol) {
+      fullName = String(row[nameCol] || 'Unknown').trim();
+    } else {
+      fullName = 'Unknown';
+    }
+
+    return {
+      id:         String(row[idCol] || `STU-${i + 1}`).trim(),
+      name:       fullName,
+      surname:    surnameCol    ? String(row[surnameCol]    || '').trim() : '',
+      otherNames: otherNameCol  ? String(row[otherNameCol]  || '').trim() : '',
+      faculty:    facultyCol    ? String(row[facultyCol]    || '').trim() : '',
+      department: deptCol       ? String(row[deptCol]       || '').trim() : '',
+      email:      emailCol      ? String(row[emailCol]      || '').trim() : '',
+      level:      levelCol      ? String(row[levelCol]      || '').trim() : '',
+      cardNo:     cardCol       ? String(row[cardCol]       || '').trim() : '',
+      raw:        row
+    };
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -213,12 +259,13 @@ app.get('/api/app/session', (req, res) => {
   }
   const session = sessions[activeSession];
   const rec = attendance[activeSession] || {};
-  res.json({
+  const sessionData = {
     sessionId: activeSession,
     sessionName: session.name,
     studentCount: session.students.length,
     presentCount: Object.keys(rec).length
-  });
+  };
+  res.json([sessionData]);
 });
 
 // GET /api/app/students – get all students in active session
@@ -229,9 +276,16 @@ app.get('/api/app/students', (req, res) => {
   const session = sessions[activeSession];
   const rec = attendance[activeSession] || {};
   const students = session.students.map(s => ({
-    id: s.id,
-    name: s.name,
-    attended: !!rec[s.id]
+    id:         s.id,
+    name:       s.name,
+    surname:    s.surname    || '',
+    otherNames: s.otherNames || '',
+    faculty:    s.faculty    || '',
+    department: s.department || '',
+    email:      s.email      || '',
+    level:      s.level      || '',
+    cardNo:     s.cardNo     || '',
+    attended:   !!rec[s.id]
   }));
   res.json({ students });
 });
@@ -297,9 +351,16 @@ app.get('/api/app/check/:studentId', (req, res) => {
   const rec = attendance[activeSession]?.[studentId];
   res.json({
     studentId,
-    name: student.name,
-    attended: !!rec,
-    markedAt: rec?.markedAt || null
+    name:       student.name,
+    surname:    student.surname    || '',
+    otherNames: student.otherNames || '',
+    faculty:    student.faculty    || '',
+    department: student.department || '',
+    email:      student.email      || '',
+    level:      student.level      || '',
+    cardNo:     student.cardNo     || '',
+    attended:   !!rec,
+    markedAt:   rec?.markedAt || null
   });
 });
 
